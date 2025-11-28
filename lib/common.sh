@@ -126,7 +126,7 @@ ssh_exec() {
 # ----------------------------------------------------------------------------
 
 init_cache() {
-    [[ "$ENABLE_CACHE" == "true" ]] && mkdir -p "${CACHE_DIR:-/tmp/imgctl-cache}" 2>/dev/null
+    [[ "$ENABLE_CACHE" == "true" ]] && mkdir -p "${CACHE_DIR:-/var/cache/imgctl}" 2>/dev/null
 }
 
 # Retrieve cached data if valid otherwise delete stale cache
@@ -140,7 +140,7 @@ get_cache() {
         return 1
     fi
 
-    local cache_file="${CACHE_DIR:-/tmp/imgctl-cache}/${key}.cache"
+    local cache_file="${CACHE_DIR:-/var/cache/imgctl}/${key}.cache"
     
     [[ "$ENABLE_CACHE" != "true" ]] && return 1
     [[ ! -f "$cache_file" ]] && return 1
@@ -157,11 +157,11 @@ get_cache() {
 set_cache() {
     local key="$1"
     local data="$2"
-    [[ "$ENABLE_CACHE" == "true" ]] && echo "$data" > "${CACHE_DIR:-/tmp/imgctl-cache}/${key}.cache"
+    [[ "$ENABLE_CACHE" == "true" ]] && echo "$data" > "${CACHE_DIR:-/var/cache/imgctl}/${key}.cache"
 }
 
 clear_cache() {
-    rm -rf "${CACHE_DIR:-/tmp/imgctl-cache}"/*.cache 2>/dev/null
+    rm -rf "${CACHE_DIR:-/var/cache/imgctl}"/*.cache 2>/dev/null
     log_info "Cache cleared"
 }
 
