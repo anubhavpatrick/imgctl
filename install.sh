@@ -15,6 +15,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
@@ -87,7 +88,6 @@ chmod 750 "$CONFIG_DIR"
 chmod 750 "$LOG_DIR"
 chmod 750 "$CACHE_DIR"
 
-
 echo -e "${GREEN}✓${NC} Directories created"
 
 # Copy files - handle both naming conventions
@@ -152,12 +152,29 @@ if [[ ! -f "$CONFIG_DIR/imgctl.conf" ]]; then
     copy_file "$CONFIG_DIR/imgctl.conf" \
         "${SCRIPT_DIR}/conf/imgctl.conf" \
         "${SCRIPT_DIR}/imgctl.conf" || exit 1
-    chmod 644 "$CONFIG_DIR/imgctl.conf"
+    chmod 640 "$CONFIG_DIR/imgctl.conf"
     echo -e "${GREEN}✓${NC} Default configuration installed"
     echo -e "${YELLOW}!${NC} Please edit $CONFIG_DIR/imgctl.conf with your cluster details"
 else
     echo -e "${YELLOW}!${NC} Configuration already exists, not overwriting"
     echo "  New default config available at: ${SCRIPT_DIR}/conf/imgctl.conf"
+fi
+
+# Copy ignore file if it exists and not already present
+if [[ ! -f "$CONFIG_DIR/images_to_ignore.txt" ]]; then
+    if [[ -f "${SCRIPT_DIR}/images_to_ignore.txt" ]]; then
+        cp -f "${SCRIPT_DIR}/images_to_ignore.txt" "$CONFIG_DIR/images_to_ignore.txt"
+        chmod 644 "$CONFIG_DIR/images_to_ignore.txt"
+        echo -e "${GREEN}✓${NC} Ignore list installed"
+    elif [[ -f "${SCRIPT_DIR}/conf/images_to_ignore.txt" ]]; then
+        cp -f "${SCRIPT_DIR}/conf/images_to_ignore.txt" "$CONFIG_DIR/images_to_ignore.txt"
+        chmod 644 "$CONFIG_DIR/images_to_ignore.txt"
+        echo -e "${GREEN}✓${NC} Ignore list installed"
+    else
+        echo -e "${YELLOW}!${NC} No ignore list found, skipping"
+    fi
+else
+    echo -e "${YELLOW}!${NC} Ignore list already exists, not overwriting"
 fi
 
 # Verify installation
@@ -179,21 +196,26 @@ echo ""
 echo -e "${BOLD}Installation Summary:${NC}"
 echo "  • Install directory:  $INSTALL_DIR"
 echo "  • Configuration:      $CONFIG_DIR/imgctl.conf"
+echo "  • Ignore list:        $CONFIG_DIR/images_to_ignore.txt"
 echo "  • Log directory:      $LOG_DIR"
+echo "  • Cache directory:    $CACHE_DIR"
 echo "  • Command:            imgctl"
 echo ""
 echo -e "${BOLD}Next Steps:${NC}"
 echo "  1. Edit the configuration file:"
-echo "     ${CYAN}sudo nano $CONFIG_DIR/imgctl.conf${NC}"
+echo -e "     ${CYAN}sudo nano $CONFIG_DIR/imgctl.conf${NC}"
 echo ""
 echo "  2. Update the following settings:"
-echo "     • WORKER_NODES  - Your DGX worker node hostnames"
-echo "     • HARBOR_URL    - Your Harbor registry URL"
-echo "     • HARBOR_USER   - Harbor username"
+echo "     • WORKER_NODES    - Your DGX worker node hostnames"
+echo "     • HARBOR_URL      - Your Harbor registry URL"
+echo "     • HARBOR_USER     - Harbor username"
 echo "     • HARBOR_PASSWORD - Harbor password"
 echo ""
-echo "  3. Test the installation:"
-echo "     ${CYAN}imgctl status${NC}"
+echo "  3. (Optional) Edit the ignore list to exclude Kubernetes system images:"
+echo -e "     ${CYAN}sudo nano $CONFIG_DIR/images_to_ignore.txt${NC}"
+echo ""
+echo "  4. Test the installation:"
+echo -e "     ${CYAN}imgctl status${NC}"
 echo ""
 echo -e "${BOLD}Quick Commands:${NC}"
 echo "  imgctl get              # Get all images"
