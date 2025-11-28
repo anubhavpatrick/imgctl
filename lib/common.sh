@@ -1,6 +1,10 @@
 #!/bin/bash
 # ============================================================================
 # imgctl - Common Library Functions (Optimized)
+# - Logging
+# - SSH Operations
+# - Cache Management
+# - Configuration Handling
 # ============================================================================
 # Author: Anubhav Patrick <anubhav.patrick@giindia.com>
 # Date: 2025-11-28
@@ -42,18 +46,21 @@ log_message() {
     local message="$2"
     local configured_level="${LOG_LEVEL:-INFO}"
     
+    # Decide if the message should be logged or not
+    # Log only if the message level is greater than or equal to configured level
     if [[ ${LOG_LEVELS[$level]:-1} -ge ${LOG_LEVELS[$configured_level]:-1} ]]; then
         local log_entry="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message"
         [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]] && echo "$log_entry" >> "$LOG_FILE"
         [[ "$level" == "ERROR" ]] && echo -e "${RED}ERROR:${NC} $message" >&2
     fi
 }
-
+# Convenience functions for different log levels
 log_debug()   { log_message "DEBUG" "$1"; }
 log_info()    { log_message "INFO" "$1"; }
 log_warning() { log_message "WARNING" "$1"; }
 log_error()   { log_message "ERROR" "$1"; }
 
+# Cleanup old log files based on retention policy
 cleanup_old_logs() {
     local log_dir="${LOG_DIR:-/var/log/giindia/imgctl}"
     [[ -d "$log_dir" ]] && find "$log_dir" -name "imgctl-*.log" -mtime +"${LOG_RETENTION_DAYS:-30}" -delete 2>/dev/null
@@ -62,7 +69,6 @@ cleanup_old_logs() {
 # ----------------------------------------------------------------------------
 # UTILITY FUNCTIONS
 # ----------------------------------------------------------------------------
-
 print_separator() { printf '%*s\n' "${1:-80}" '' | tr ' ' '-'; }
 
 print_header() {
@@ -123,8 +129,17 @@ init_cache() {
     [[ "$ENABLE_CACHE" == "true" ]] && mkdir -p "${CACHE_DIR:-/tmp/imgctl-cache}" 2>/dev/null
 }
 
+# Retrieve cached data if valid otherwise delete stale cache
 get_cache() {
     local key="$1"
+
+    # SANITIZATION: Allow only alphanumeric characters, underscores, and hyphens
+    # Helps prevent directory traversal and injection attacks
+    if [[ ! "$key" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "Security Alert: Invalid characters in cache key: $key"
+        return 1
+    fi
+
     local cache_file="${CACHE_DIR:-/tmp/imgctl-cache}/${key}.cache"
     
     [[ "$ENABLE_CACHE" != "true" ]] && return 1
@@ -163,8 +178,7 @@ load_config() {
 find_config() {
     local locations=(
         "/etc/imgctl/imgctl.conf"
-        "$HOME/.config/imgctl/imgctl.conf"
-        "./imgctl.conf"
+        "/root/imgctl/conf/imgctl.conf"
     )
     
     for loc in "${locations[@]}"; do

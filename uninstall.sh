@@ -21,7 +21,7 @@ INSTALL_DIR="/opt/imgctl"
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/imgctl"
 LOG_DIR="/var/log/giindia/imgctl"
-CACHE_DIR="/tmp/imgctl-cache"
+CACHE_DIR="/var/cache/imgctl"
 
 echo -e "${BOLD}${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${BLUE}║              imgctl - Uninstaller                          ║${NC}"

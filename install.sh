@@ -23,6 +23,7 @@ INSTALL_DIR="/opt/imgctl"
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/imgctl"
 LOG_DIR="/var/log/giindia/imgctl"
+CACHE_DIR="/var/cache/imgctl"
 COMMAND_NAME="imgctl"
 
 # Get script directory
@@ -79,10 +80,13 @@ echo -e "${BLUE}[2/6]${NC} Creating directories..."
 mkdir -p "$INSTALL_DIR"/{bin,lib,conf}
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$LOG_DIR"
+mkdir -p "$CACHE_DIR"
 
 chmod 755 "$INSTALL_DIR"
-chmod 755 "$CONFIG_DIR"
-chmod 755 "$LOG_DIR"
+chmod 750 "$CONFIG_DIR"
+chmod 750 "$LOG_DIR"
+chmod 750 "$CACHE_DIR"
+
 
 echo -e "${GREEN}✓${NC} Directories created"
 
