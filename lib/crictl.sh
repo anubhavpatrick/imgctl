@@ -19,42 +19,6 @@ SCRIPT_DIR="$(cd "$RELATIVE_PATH" && pwd)"
 HAS_PARALLEL=$(command -v parallel >/dev/null 2>&1 && echo "yes" || echo "no")
 
 # ----------------------------------------------------------------------------
-# IGNORE LIST FUNCTIONS
-# ----------------------------------------------------------------------------
-
-# Load ignore list from CSV file
-# Returns a newline-separated list of "IMAGE,TAG" entries
-# Currently not used
-load_ignore_list() {
-    local ignore_file="${IGNORE_FILE:-/etc/imgctl/images_to_ignore.txt}"
-    
-    # If the ignore file does not exist, return without error
-    [[ ! -f "$ignore_file" ]] && return
-    
-    # Skip header line and extract IMAGE,TAG columns
-    tail -n +2 "$ignore_file" | awk -F',' '{print $1","$2}' 2>/dev/null
-}
-
-# Check if an image should be ignored
-# Args: $1 = repository, $2 = tag
-# Currently not used
-should_ignore_image() {
-    local repo="$1"
-    local tag="$2"
-    local ignore_list="$3"
-    
-    # Always ignore images without tags
-    [[ "$tag" == "<none>" || -z "$tag" ]] && echo "yes" && return
-    
-    # Check against ignore list
-    if [[ -n "$ignore_list" ]]; then #-n checks if the string is not empty
-        echo "$ignore_list" | grep -qF "${repo},${tag}" && echo "yes" && return 
-    fi
-    
-    echo "no"
-}
-
-# ----------------------------------------------------------------------------
 # CRICTL FUNCTIONS
 # ----------------------------------------------------------------------------
 
@@ -104,47 +68,6 @@ parse_crictl_output() {
     }
     END { print "]" }
     '
-}
-
-# Filter images JSON based on ignore list and remove <none> tags
-# Currently not used
-filter_images() {
-    local images_json="$1"
-    local ignore_file="${IGNORE_FILE:-/etc/imgctl/images_to_ignore.txt}"
-    
-    # Build jq filter to remove <none> tags and empty tags
-    local jq_filter='[.[] | select(.tag != "<none>" and .tag != "")]'
-    
-    # If ignore file exists, also filter by it
-    if [[ -f "$ignore_file" ]]; then
-        # Create ignore patterns from file
-        local ignore_patterns=""
-        while IFS=',' read -r img tag _ _; do
-            [[ "$img" == "IMAGE" ]] && continue  # Skip header
-            [[ -z "$img" ]] && continue
-            # if ignore_patterns is not empty, add a pipe separator
-            if [[ -n "$ignore_patterns" ]]; then
-                ignore_patterns+="|"
-            fi
-            # Escape special regex chars to avoid regex injection attacks
-            local escaped_img=$(echo "$img" | sed 's/[.[\*^$()+?{|]/\\&/g')
-            local escaped_tag=$(echo "$tag" | sed 's/[.[\*^$()+?{|]/\\&/g')
-            ignore_patterns+="(${escaped_img},${escaped_tag})"
-        done < "$ignore_file"
-        
-        if [[ -n "$ignore_patterns" ]]; then
-            # Use jq with ignore list
-            # Filter images having <none> or empty tags and not matching the ignore patterns
-            echo "$images_json" | jq --arg pattern "$ignore_patterns" '
-                [.[] | select(.tag != "<none>" and .tag != "") | 
-                 select(("\(.repository),\(.tag)" | test($pattern)) | not)]
-            '
-            return
-        fi
-    fi
-    
-    # Just filter out <none> tags
-    echo "$images_json" | jq "$jq_filter"
 }
 
 # Get images from a single node
