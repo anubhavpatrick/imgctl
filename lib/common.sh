@@ -68,11 +68,17 @@ log_message() {
     local message="$2"
     local configured_level="${LOG_LEVEL:-INFO}"
     
-    # Decide if the message should be logged or not
-    # Log only if the message level is greater than or equal to configured level
     if [[ ${LOG_LEVELS[$level]:-1} -ge ${LOG_LEVELS[$configured_level]:-1} ]]; then
         local log_entry="[$(date '+%Y-%m-%d %H:%M:%S')] [${CORRELATION_ID}] [$level] $message"
-        [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]] && echo "$log_entry" >> "$LOG_FILE"
+        
+        if [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]]; then
+            # Check file size before writing (default 10MB limit)
+            local file_size=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+            if [[ $file_size -lt ${MAX_LOG_SIZE:-10485760} ]]; then
+                echo "$log_entry" >> "$LOG_FILE"
+            fi
+        fi
+        
         [[ "$level" == "ERROR" ]] && echo -e "${RED}ERROR:${NC} $message" >&2
     fi
 }
