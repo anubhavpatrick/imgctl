@@ -50,6 +50,11 @@ tree
 # │   └── imgctl
 # ├── conf/
 # │   └── imgctl.conf
+# ├── docs/
+# │   ├── ARCHITECTURE.md
+# │   ├── CONFIGURATION.md
+# │   ├── DATA_FLOW.md
+# │   └── QUICK_REFERENCE.md
 # ├── lib/
 # │   ├── common.sh
 # │   ├── crictl.sh
@@ -279,6 +284,32 @@ sudo rm -rf /var/cache/imgctl/*.cache
 /usr/local/bin/imgctl           # Symlink to executable
 ```
 
+### Source Repository Structure
+
+```
+imgctl/                         # Project root
+├── bin/imgctl                  # Main CLI executable
+├── conf/imgctl.conf            # Default configuration template
+├── docs/                       # Documentation
+│   ├── ARCHITECTURE.md         # System architecture diagrams
+│   ├── CONFIGURATION.md        # Configuration guide
+│   ├── DATA_FLOW.md            # Data flow documentation
+│   └── QUICK_REFERENCE.md      # Quick reference guide
+├── lib/                        # Library modules
+│   ├── common.sh               # Core utilities
+│   ├── crictl.sh               # Worker node operations
+│   ├── harbor.sh               # Harbor API operations
+│   └── output.sh               # Output formatting
+├── tests/                      # Test documentation
+│   ├── common_test_cases.md
+│   ├── crictl_test_cases.md
+│   └── harbor_test_cases.md
+├── images_to_ignore.txt        # Default ignore list
+├── install.sh                  # Installation script
+├── uninstall.sh                # Uninstallation script
+└── README.md                   # This file
+```
+
 ## Configuration Reference
 
 | Setting | Description | Default |
@@ -435,6 +466,23 @@ The uninstaller will prompt before removing configuration and logs.
 │  └────────────────┘  └────────────────┘                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Documentation
+
+Detailed documentation is available in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture diagrams, module dependencies, and component overview |
+| [DATA_FLOW.md](docs/DATA_FLOW.md) | Data collection, transformation pipeline, and comparison algorithm |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Complete configuration guide with examples for different environments |
+| [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | One-page visual guide with command cheat sheet and troubleshooting |
+
+### Quick Links
+
+- **New to imgctl?** Start with [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
+- **Setting up a cluster?** See [CONFIGURATION.md](docs/CONFIGURATION.md)
+- **Understanding the internals?** Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [DATA_FLOW.md](docs/DATA_FLOW.md)
 
 ## Version History
 
