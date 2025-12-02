@@ -114,12 +114,44 @@ show_version() {
 
 # Handle 'get' command
 cmd_get() {
-    local scope="${1:-all}"
-    shift 2>/dev/null || true 
-    
+    local scope="all"
     local harbor_images="[]"
     local node_images="{}"
     local comparison=""
+    
+    # Parse arguments - scope and options can appear in any order
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                OUTPUT_FORMAT="$2"
+                shift 2
+                ;;
+            --no-color)
+                RED="" GREEN="" YELLOW="" BLUE="" CYAN="" NC="" BOLD=""
+                shift
+                ;;
+            -q|--quiet)
+                LOG_LEVEL="ERROR"
+                shift
+                ;;
+            all|harbor|nodes)
+                scope="$1"
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                print_error "Unknown option: $1"
+                echo "Use 'imgctl help' for usage information"
+                return 1
+                ;;
+            *)
+                log_error "Invalid scope: $1"
+                print_error "Invalid scope: $1"
+                echo "Valid scopes: all, harbor, nodes"
+                return 1
+                ;;
+        esac
+    done
     
     case "$scope" in
         all)
@@ -155,12 +187,6 @@ cmd_get() {
             node_images=$(get_all_nodes_images)
             comparison=$(compare_node_images "$node_images")
             ;;
-        *)
-            log_error "Invalid scope: $scope"
-            print_error "Invalid scope: $scope"
-            echo "Valid scopes: all, harbor, nodes"
-            return 1
-            ;;
     esac
     
     # Display output
@@ -169,6 +195,36 @@ cmd_get() {
 
 # Handle 'compare' command
 cmd_compare() {
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                OUTPUT_FORMAT="$2"
+                shift 2
+                ;;
+            --no-color)
+                RED="" GREEN="" YELLOW="" BLUE="" CYAN="" NC="" BOLD=""
+                shift
+                ;;
+            -q|--quiet)
+                LOG_LEVEL="ERROR"
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                print_error "Unknown option: $1"
+                echo "Use 'imgctl help' for usage information"
+                return 1
+                ;;
+            *)
+                log_error "Unexpected argument: $1"
+                print_error "Unexpected argument: $1"
+                echo "Use 'imgctl help' for usage information"
+                return 1
+                ;;
+        esac
+    done
+    
     log_info "Comparing images across nodes"
     
     local node_images
