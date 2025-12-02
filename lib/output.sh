@@ -78,7 +78,7 @@ format_table() {
     
     local count=$(echo "$images_json" | jq 'length')
     
-    print_header "$title ($count images)"
+    print_header "$title ($count images)" 107
     
     [[ $count -eq 0 ]] && print_info "No images found" && return
     
