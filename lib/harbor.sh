@@ -201,9 +201,22 @@ process_harbor_repo() {
     ' 2>/dev/null
 }
 
+# Fetch repositories for a single project (called by parallel)
+fetch_project_repos() {
+    local project_name="$1"
+    
+    local repos
+    repos=$(harbor_api_get_all "/api/v2.0/projects/${project_name}/repositories")
+    
+    [[ "$repos" == "[]" || -z "$repos" ]] && return
+    
+    # Output in tab-separated format: project_name\tfull_repo_name
+    echo "$repos" | jq -r --arg p "$project_name" '.[] | "\($p)\t\(.name)"'
+}
+
 # Export functions for GNU parallel
 # Also export shared functions from common.sh that may be used
-export -f process_harbor_repo url_encode double_url_encode get_cache set_cache 2>/dev/null
+export -f process_harbor_repo fetch_project_repos url_encode double_url_encode harbor_api_get_all harbor_curl log_debug log_warning get_cache set_cache 2>/dev/null
 
 # Get all Harbor images with parallel processing
 get_harbor_images() {
@@ -244,23 +257,28 @@ get_harbor_images() {
     
     local project_names=$(echo "$projects" | jq -r '.[].name') #-r is used to output the result as a raw string
     
-    # Fetch repositories for all projects (can also be parallelized)
-    # IFS (Internal Field Separator) is used to read the input line by line verbatim
+    # Fetch repositories for all projects in parallel
     start_time=$SECONDS
-    while IFS= read -r project_name; do
-        [[ -z "$project_name" ]] && continue
+    local project_count=$(echo "$project_names" | grep -c .)
+    
+    if [[ "$HAS_PARALLEL" == "yes" && $project_count -gt 1 ]]; then
+        log_debug "Fetching repos from $project_count projects in parallel"
         
-        local repos
-        repos=$(harbor_api_get_all "/api/v2.0/projects/${project_name}/repositories")
+        # Export variables for parallel
+        export HARBOR_URL HARBOR_USER HARBOR_PASSWORD HARBOR_VERIFY_SSL HARBOR_PAGE_SIZE
         
-        [[ "$repos" == "[]" || -z "$repos" ]] && continue
-        
-        # Add each repo to the list in a tab separated format
-        # Example: "project1\trepo1"
-        echo "$repos" | jq -r --arg p "$project_name" '.[] | "\($p)\t\(.name)"' >> "$repo_list"
-    done <<< "$project_names"
+        echo "$project_names" | parallel --will-cite -j "$MAX_PARALLEL_JOBS" \
+            "source '${SCRIPT_DIR}/harbor.sh' 2>/dev/null; fetch_project_repos {}" > "$repo_list"
+    else
+        log_debug "Fetching repos from $project_count projects sequentially"
+        while IFS= read -r project_name; do
+            [[ -z "$project_name" ]] && continue
+            fetch_project_repos "$project_name" >> "$repo_list"
+        done <<< "$project_names"
+    fi
+    
     local repos_loop_time=$((SECONDS - start_time))
-    log_info "Repository loop took ${repos_loop_time} seconds for $(echo "$project_names" | wc -l) projects"
+    log_info "Repository loop took ${repos_loop_time} seconds for $project_count projects"
     
     local repo_count=$(wc -l < "$repo_list") 
     log_info "Found $repo_count repositories to process"
