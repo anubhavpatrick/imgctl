@@ -5,10 +5,11 @@
 # This script installs imgctl on the BCM head node.
 #
 # Author: Anubhav Patrick <anubhav.patrick@giindia.com>
-# Date: 2025-06-11
+# Date: 2025-12-03
 # ============================================================================
 
-set -e
+# set -e is used to exit the script if any command fails
+set -e 
 
 # Colors
 RED='\033[0;31m'
@@ -19,13 +20,13 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-# Installation paths
-INSTALL_DIR="/opt/imgctl"
-BIN_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/imgctl"
-LOG_DIR="/var/log/giindia/imgctl"
-CACHE_DIR="/var/cache/imgctl"
-COMMAND_NAME="imgctl"
+# Installation paths - readonly to prevent tampering
+readonly INSTALL_DIR="/opt/imgctl"
+readonly BIN_DIR="/usr/local/bin"
+readonly CONFIG_DIR="/etc/imgctl"
+readonly LOG_DIR="/var/log/giindia/imgctl"
+readonly CACHE_DIR="/var/cache/imgctl"
+readonly COMMAND_NAME="imgctl"
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,10 +43,11 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 # Check dependencies
-echo -e "${BLUE}[1/6]${NC} Checking dependencies..."
+echo -e "${BLUE}[1/7]${NC} Checking dependencies..."
 
-missing_deps=()
+missing_deps=() # array to store missing dependencies
 
+# -v is used to check if the command is available
 if ! command -v jq >/dev/null 2>&1; then
     missing_deps+=("jq")
 fi
@@ -62,7 +64,7 @@ if [[ ${#missing_deps[@]} -gt 0 ]]; then
     echo -e "${YELLOW}Installing missing dependencies: ${missing_deps[*]}${NC}"
     
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq
+        apt-get update -qq # -qq is used to suppress progress output
         apt-get install -y "${missing_deps[@]}"
     elif command -v yum >/dev/null 2>&1; then
         yum install -y "${missing_deps[@]}"
@@ -75,34 +77,95 @@ if [[ ${#missing_deps[@]} -gt 0 ]]; then
 fi
 echo -e "${GREEN}✓${NC} Dependencies satisfied"
 
+# Security check: ensure installation paths don't contain malicious symlinks
+echo -e "${BLUE}[2/7]${NC} Performing security checks..."
+
+# Function to check for dangerous symlinks in path
+check_path_security() {
+    local path="$1"
+    local current=""
+    
+    # Split path and check each component
+    # -ra is used to read the array as elements
+    IFS='/' read -ra PARTS <<< "$path"
+    for part in "${PARTS[@]}"; do
+        [[ -z "$part" ]] && continue
+        current="$current/$part"
+        
+        if [[ -L "$current" ]]; then
+            echo -e "${RED}Security Error:${NC} Symlink detected in installation path: $current"
+            echo "This could be a symlink attack. Please investigate and remove the symlink."
+            exit 1
+        fi
+    done
+}
+
+# Check all installation paths for existing symlinks
+for check_path in "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$CACHE_DIR"; do
+    if [[ -e "$check_path" ]]; then
+        check_path_security "$check_path"
+        
+        # Additional check: if directory exists, verify ownership
+        if [[ -d "$check_path" ]]; then
+            owner=$(stat -c '%u' "$check_path" 2>/dev/null || stat -f '%u' "$check_path" 2>/dev/null)
+            if [[ "$owner" != "0" ]] && [[ "$owner" != "$(id -u)" ]]; then
+                echo -e "${YELLOW}Warning:${NC} $check_path exists but is owned by uid $owner"
+                read -p "Continue installation? This may be unsafe. [y/N] " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    echo "Installation cancelled."
+                    exit 1
+                fi
+            fi
+        fi
+    fi
+done
+
+echo -e "${GREEN}✓${NC} Security checks passed"
+
 # Create directories
-echo -e "${BLUE}[2/6]${NC} Creating directories..."
+echo -e "${BLUE}[3/7]${NC} Creating directories..."
+
+# Use umask to ensure secure default permissions during directory creation
+OLD_UMASK=$(umask)
+umask 027
 
 mkdir -p "$INSTALL_DIR"/{bin,lib,conf}
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$LOG_DIR"
 mkdir -p "$CACHE_DIR"
 
+# Restore original umask
+umask "$OLD_UMASK"
+
+# Explicitly set permissions (defense in depth)
 chmod 755 "$INSTALL_DIR"
 chmod 750 "$CONFIG_DIR"
 chmod 750 "$LOG_DIR"
 chmod 750 "$CACHE_DIR"
 
+# Set ownership explicitly to root
+chown root:root "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$CACHE_DIR"
+
 echo -e "${GREEN}✓${NC} Directories created"
 
-# Copy files - handle both naming conventions
-echo -e "${BLUE}[3/6]${NC} Installing files..."
+# Copy files
+echo -e "${BLUE}[4/7]${NC} Installing files..."
 
-# Function to find and copy a file with fallback names
+# Function to securely copy a file (rejects symlinks)
 copy_file() {
     local dest="$1"
     shift
     local sources=("$@")
     
     for src in "${sources[@]}"; do
-        if [[ -f "$src" ]]; then
-            cp -f "$src" "$dest"
+        if [[ -f "$src" ]] && [[ ! -L "$src" ]]; then
+            # Use -- to prevent argument injection
+            # -- mean end of options
+            cp -f -- "$src" "$dest"
             return 0
+        elif [[ -L "$src" ]]; then
+            echo -e "${YELLOW}Warning:${NC} Skipping symlink: $src"
         fi
     done
     
@@ -110,75 +173,58 @@ copy_file() {
     return 1
 }
 
-# Copy library files (handle lib-*.sh or *.sh naming)
-copy_file "$INSTALL_DIR/lib/common.sh" \
-    "${SCRIPT_DIR}/lib/common.sh" \
-    "${SCRIPT_DIR}/lib/lib-common.sh" || exit 1
-
-copy_file "$INSTALL_DIR/lib/crictl.sh" \
-    "${SCRIPT_DIR}/lib/crictl.sh" \
-    "${SCRIPT_DIR}/lib/lib-crictl.sh" || exit 1
-
-copy_file "$INSTALL_DIR/lib/harbor.sh" \
-    "${SCRIPT_DIR}/lib/harbor.sh" \
-    "${SCRIPT_DIR}/lib/lib-harbor.sh" || exit 1
-
-copy_file "$INSTALL_DIR/lib/output.sh" \
-    "${SCRIPT_DIR}/lib/output.sh" \
-    "${SCRIPT_DIR}/lib/lib-output.sh" || exit 1
+# Copy library files
+copy_file "$INSTALL_DIR/lib/common.sh" "${SCRIPT_DIR}/lib/common.sh" || exit 1
+copy_file "$INSTALL_DIR/lib/crictl.sh" "${SCRIPT_DIR}/lib/crictl.sh" || exit 1
+copy_file "$INSTALL_DIR/lib/harbor.sh" "${SCRIPT_DIR}/lib/harbor.sh" || exit 1
+copy_file "$INSTALL_DIR/lib/output.sh" "${SCRIPT_DIR}/lib/output.sh" || exit 1
 
 chmod 644 "$INSTALL_DIR/lib/"*.sh
 
-# Copy binary (handle imgctl or imgctl.sh naming)
-copy_file "$INSTALL_DIR/bin/imgctl" \
-    "${SCRIPT_DIR}/bin/imgctl" \
-    "${SCRIPT_DIR}/bin/imgctl.sh" || exit 1
+# Copy binary
+copy_file "$INSTALL_DIR/bin/imgctl" "${SCRIPT_DIR}/bin/imgctl" || exit 1
 
 chmod 755 "$INSTALL_DIR/bin/imgctl"
 
 echo -e "${GREEN}✓${NC} Files installed"
 
 # Create symlink
-echo -e "${BLUE}[4/6]${NC} Creating command symlink..."
+echo -e "${BLUE}[5/7]${NC} Creating command symlink..."
 
-ln -sf "$INSTALL_DIR/bin/imgctl" "$BIN_DIR/$COMMAND_NAME"
+# Remove existing symlink if present (safely)
+if [[ -L "$BIN_DIR/$COMMAND_NAME" ]]; then
+    rm -f -- "$BIN_DIR/$COMMAND_NAME"
+elif [[ -e "$BIN_DIR/$COMMAND_NAME" ]]; then
+    echo -e "${RED}Error:${NC} $BIN_DIR/$COMMAND_NAME exists and is not a symlink"
+    echo "Please remove it manually before installing."
+    exit 1
+fi
+
+# -s is used to create a symbolic link; -f is used to force the link
+# -- is used to prevent argument injection
+ln -sf -- "$INSTALL_DIR/bin/imgctl" "$BIN_DIR/$COMMAND_NAME"
 
 echo -e "${GREEN}✓${NC} Symlink created: $BIN_DIR/$COMMAND_NAME"
 
-# Install configuration
-echo -e "${BLUE}[5/6]${NC} Installing configuration..."
+# Install configuration (always overwrite for clean install)
+echo -e "${BLUE}[6/7]${NC} Installing configuration..."
 
-if [[ ! -f "$CONFIG_DIR/imgctl.conf" ]]; then
-    copy_file "$CONFIG_DIR/imgctl.conf" \
-        "${SCRIPT_DIR}/conf/imgctl.conf" \
-        "${SCRIPT_DIR}/imgctl.conf" || exit 1
-    chmod 640 "$CONFIG_DIR/imgctl.conf"
-    echo -e "${GREEN}✓${NC} Default configuration installed"
-    echo -e "${YELLOW}!${NC} Please edit $CONFIG_DIR/imgctl.conf with your cluster details"
-else
-    echo -e "${YELLOW}!${NC} Configuration already exists, not overwriting"
-    echo "  New default config available at: ${SCRIPT_DIR}/conf/imgctl.conf"
-fi
+copy_file "$CONFIG_DIR/imgctl.conf" "${SCRIPT_DIR}/conf/imgctl.conf" || exit 1
+chmod 640 "$CONFIG_DIR/imgctl.conf"
+echo -e "${GREEN}✓${NC} Configuration installed"
+echo -e "${YELLOW}!${NC} Please edit $CONFIG_DIR/imgctl.conf with your cluster details"
 
-# Copy ignore file if it exists and not already present
-if [[ ! -f "$CONFIG_DIR/images_to_ignore.txt" ]]; then
-    if [[ -f "${SCRIPT_DIR}/images_to_ignore.txt" ]]; then
-        cp -f "${SCRIPT_DIR}/images_to_ignore.txt" "$CONFIG_DIR/images_to_ignore.txt"
-        chmod 644 "$CONFIG_DIR/images_to_ignore.txt"
-        echo -e "${GREEN}✓${NC} Ignore list installed"
-    elif [[ -f "${SCRIPT_DIR}/conf/images_to_ignore.txt" ]]; then
-        cp -f "${SCRIPT_DIR}/conf/images_to_ignore.txt" "$CONFIG_DIR/images_to_ignore.txt"
-        chmod 644 "$CONFIG_DIR/images_to_ignore.txt"
-        echo -e "${GREEN}✓${NC} Ignore list installed"
-    else
-        echo -e "${YELLOW}!${NC} No ignore list found, skipping"
-    fi
+# Copy ignore file (always overwrite for clean install)
+if [[ -f "${SCRIPT_DIR}/images_to_ignore.txt" ]] && [[ ! -L "${SCRIPT_DIR}/images_to_ignore.txt" ]]; then
+    cp -f -- "${SCRIPT_DIR}/images_to_ignore.txt" "$CONFIG_DIR/images_to_ignore.txt"
+    chmod 644 "$CONFIG_DIR/images_to_ignore.txt"
+    echo -e "${GREEN}✓${NC} Ignore list installed"
 else
-    echo -e "${YELLOW}!${NC} Ignore list already exists, not overwriting"
+    echo -e "${YELLOW}!${NC} No ignore list found, skipping"
 fi
 
 # Verify installation
-echo -e "${BLUE}[6/6]${NC} Verifying installation..."
+echo -e "${BLUE}[7/7]${NC} Verifying installation..."
 
 if command -v imgctl >/dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} Installation verified"
@@ -215,7 +261,7 @@ echo "  3. (Optional) Edit the ignore list to exclude Kubernetes system images:"
 echo -e "     ${CYAN}sudo nano $CONFIG_DIR/images_to_ignore.txt${NC}"
 echo ""
 echo "  4. Test the installation:"
-echo -e "     ${CYAN}imgctl status${NC}"
+echo -e "     ${CYAN}imgctl --version${NC}"
 echo ""
 echo -e "${BOLD}Quick Commands:${NC}"
 echo "  imgctl get              # Get all images"
