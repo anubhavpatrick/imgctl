@@ -65,6 +65,14 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+The installer will automatically:
+- Install dependencies (`jq`, `curl`) if missing
+- Copy files to `/opt/imgctl/`
+- Install configuration to `/etc/imgctl/imgctl.conf`
+- Copy the ignore list to `/etc/imgctl/images_to_ignore.txt`
+- Create log and cache directories
+- Create symlink at `/usr/local/bin/imgctl`
+
 ### Configuration
 
 Edit the configuration file:
@@ -89,20 +97,14 @@ HARBOR_VERIFY_SSL="false"
 IGNORE_FILE="/etc/imgctl/images_to_ignore.txt"
 ```
 
-### Copy the Ignore File
-
-```bash
-sudo cp images_to_ignore.txt /etc/imgctl/images_to_ignore.txt
-```
-
 ### Verify Installation
 
 ```bash
 # Check version
 imgctl --version
 
-# Check connectivity to nodes and Harbor
-imgctl status
+# Show help
+imgctl help
 ```
 
 ## Usage
@@ -113,14 +115,14 @@ imgctl status
 # Get all images (Harbor + node comparison)
 imgctl get
 
+# Same as above (explicit)
+imgctl get all
+
 # Get Harbor images only
 imgctl get harbor
 
 # Get images from all nodes (with comparison)
 imgctl get nodes
-
-# Get images from a specific node
-imgctl get k8s-worker1
 
 # Output in JSON format
 imgctl get -o json
@@ -139,46 +141,20 @@ imgctl compare
 imgctl compare -o json
 ```
 
-### Cache Management
+### Options
 
 ```bash
-# Show cache statistics
-imgctl cache show
-
-# Clear cache (for fresh data)
-imgctl cache clear
-```
-
-### Configuration
-
-```bash
-# Show current configuration
-imgctl config show
-
-# Set Harbor server URL
-imgctl config --server https://new-harbor:9443
-```
-
-### Additional Options
-
-```bash
-# Use specific configuration file
-imgctl -c /path/to/config.conf get
-
-# Override nodes
-imgctl -n "node1,node2,node3" get nodes
-
-# Disable cache for this request
-imgctl --no-cache get
-
-# Verbose output (debug mode)
-imgctl -v get
-
 # Quiet mode (errors only)
 imgctl -q get
 
-# Disable colors
+# Disable colored output
 imgctl --no-color get
+
+# Show version
+imgctl --version
+
+# Show help
+imgctl help
 ```
 
 ## Output Format
@@ -270,8 +246,8 @@ cat /etc/imgctl/images_to_ignore.txt
 # Add a new image to ignore
 echo "docker.io/library/busybox,latest,abc123,2MB" >> /etc/imgctl/images_to_ignore.txt
 
-# Clear cache after modifying ignore list
-imgctl cache clear
+# Clear cache after modifying ignore list (to see changes immediately)
+sudo rm -rf /var/cache/imgctl/*.cache
 ```
 
 ## Directory Structure
@@ -297,7 +273,7 @@ imgctl cache clear
 /var/log/giindia/imgctl/        # Log directory
 └── imgctl-YYYY-MM-DD.log       # Daily log files
 
-/tmp/imgctl-cache/              # Cache directory
+/var/cache/imgctl/              # Cache directory
 └── *.cache                     # Cached data files
 
 /usr/local/bin/imgctl           # Symlink to executable
@@ -320,12 +296,13 @@ imgctl cache clear
 | `IGNORE_FILE` | Path to ignore list CSV | `/etc/imgctl/images_to_ignore.txt` |
 | `MAX_PARALLEL_JOBS` | Parallel job limit | `10` |
 | `CRICTL_PATH` | Path to crictl on workers | `/usr/bin/crictl` |
-| `CRICTL_TIMEOUT` | Crictl command timeout | `30` |
+| `CRICTL_TIMEOUT` | Crictl command timeout (seconds) | `30` |
 | `LOG_DIR` | Log file directory | `/var/log/giindia/imgctl` |
 | `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
 | `LOG_RETENTION_DAYS` | Days to keep logs | `30` |
+| `MAX_LOG_SIZE` | Maximum log file size in bytes | `104857600` (100MB) |
 | `ENABLE_CACHE` | Enable caching | `true` |
-| `CACHE_DIR` | Cache directory | `/tmp/imgctl-cache` |
+| `CACHE_DIR` | Cache directory | `/var/cache/imgctl` |
 | `CACHE_TTL` | Cache TTL in seconds | `300` |
 | `DEFAULT_OUTPUT_FORMAT` | Default output format | `table` |
 
@@ -333,7 +310,7 @@ imgctl cache clear
 
 ### Enable GNU Parallel
 
-For best performance, install GNU parallel:
+For best performance with many nodes/repositories, install GNU parallel:
 
 ```bash
 # Ubuntu/Debian
@@ -343,23 +320,33 @@ sudo apt-get install parallel
 sudo yum install parallel
 ```
 
+The tool auto-detects GNU parallel and uses it when available. Otherwise, it falls back to native Bash background jobs.
+
 ### Adjust Parallel Jobs
 
 Edit `/etc/imgctl/imgctl.conf`:
 
 ```bash
-# Increase for faster Harbor processing
+# Increase for faster Harbor processing (default: 10)
 MAX_PARALLEL_JOBS="20"
 ```
 
 ### Cache Settings
 
+Edit `/etc/imgctl/imgctl.conf`:
+
 ```bash
-# Shorter TTL for more frequent updates
+# Shorter TTL for more frequent updates (default: 300 seconds)
 CACHE_TTL="60"
 
 # Disable cache for always-fresh data
 ENABLE_CACHE="false"
+```
+
+To manually clear the cache:
+
+```bash
+sudo rm -rf /var/cache/imgctl/*.cache
 ```
 
 ## Troubleshooting
@@ -398,14 +385,15 @@ ssh k8s-worker1 "crictl images"
 ssh k8s-worker1 "systemctl status containerd"
 ```
 
-### Debug Mode
+### Check Logs
 
 ```bash
-# Run with verbose logging
-imgctl -v get
-
-# Check logs
+# View today's log file
 tail -f /var/log/giindia/imgctl/imgctl-$(date +%Y-%m-%d).log
+
+# Enable debug logging by editing config
+sudo nano /etc/imgctl/imgctl.conf
+# Set: LOG_LEVEL="DEBUG"
 ```
 
 ### Clear Cache
@@ -413,7 +401,7 @@ tail -f /var/log/giindia/imgctl/imgctl-$(date +%Y-%m-%d).log
 If you see stale data:
 
 ```bash
-imgctl cache clear
+sudo rm -rf /var/cache/imgctl/*.cache
 imgctl get
 ```
 
@@ -452,9 +440,9 @@ The uninstaller will prompt before removing configuration and logs.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 2.1.0 | 2025-06-11 | Added ignore file support, `<none>` tag filtering, new display order |
-| 2.0.0 | 2025-06-11 | Complete rewrite in shell with parallel processing |
-| 1.0.0 | 2025-06-10 | Initial Python-based implementation |
+| 2.1.0 | 2025-12-02 | Added ignore file support, `<none>` tag filtering, new display order |
+| 2.0.0 | 2025-11-28 | Complete rewrite in shell with parallel processing |
+| 1.0.0 | 2025-11-27 | Initial Python-based implementation |
 
 ## Author
 
