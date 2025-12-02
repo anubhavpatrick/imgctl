@@ -244,6 +244,9 @@ compare_node_images() {
     # }
     map_values([.[] | select(should_keep)]) |
     
+    # Capture node names BEFORE transforming the data structure
+    keys as $nodes |
+    
     # -----------------------------------------------------------
     # Input:
     # {
@@ -292,17 +295,6 @@ compare_node_images() {
     }) as $item (
         {};
         .[$item.ref] = (.[$item.ref] // {image: $item.image, nodes: []}) |
-        .[$item.ref].nodes += [$item.node]
-    )
-    # Now do the comparison
-    keys as $nodes |
-    reduce (to_entries[] | .key as $node | .value[] | {
-        ref: "\(.repository):\(.tag)",
-        node: $node,
-        image: .
-    }) as $item (
-        {};
-        .[$item.ref] = (.[$item.ref] // {image: $item.image, nodes: []}) | 
         .[$item.ref].nodes += [$item.node]
     ) |
 
