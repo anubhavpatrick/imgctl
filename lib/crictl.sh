@@ -8,8 +8,6 @@
 #   - Output Parsing: Robustly converts 'crictl images' text tables into structured JSON.
 #   - Parallel Fetching: Orchestrates concurrent SSH data retrieval using GNU Parallel 
 #     or native Bash background jobs (auto-detects capability).
-#   - Intelligent Caching: Caches raw JSON responses per node to 
-#     minimize network latency and SSH handshake overhead.
 #   - Advanced Filtering: Applies regex-based blocklists (from CSV) and removes 
 #     dangling (<none>) images using optimized 'jq' pipelines.
 #   - Comparative Analysis: Implements a Map-Reduce engine to pivot data from 
@@ -97,8 +95,9 @@ get_node_images_single() {
     local output
     output=$(ssh_exec "$node" "timeout ${CRICTL_TIMEOUT:-30} ${CRICTL_PATH:-/usr/bin/crictl} images 2>/dev/null")
     
-    # If ssh command fails or output is empty, return empty JSON
+    # If ssh command fails or output is empty, log warning and return empty JSON
     if [[ $? -ne 0 || -z "$output" ]]; then
+        log_warning "Failed to retrieve images from node: $node (unreachable or crictl error)"
         echo "[]"
         return 1
     fi
@@ -114,7 +113,7 @@ get_node_images_single() {
 
 # Export functions to be used in parallel otherwise the subprocesses will not have access to the functions
 # Also export shared functions from common.sh that are now used by get_node_images_single
-export -f parse_crictl_output get_node_images_single build_ssh_command ssh_exec get_cache set_cache 2>/dev/null
+export -f parse_crictl_output get_node_images_single build_ssh_command ssh_exec get_cache set_cache log_message log_warning 2>/dev/null
 
 # Get images from all nodes
 get_all_nodes_images() {
@@ -147,26 +146,39 @@ get_all_nodes_images() {
         done
     fi
     
-    # Combine results
+    # Combine results and track failures
     local result="{"
     local first=true
+    local failed_nodes=()
+    local success_count=0
     
     for node in "${nodes[@]}"; do
         local node_file="$tmpdir/${node}.json"
         if [[ -f "$node_file" ]]; then
             local content=$(cat "$node_file")
+            if [[ -z "$content" || "$content" == "[]" ]]; then
+                failed_nodes+=("$node")
+            else
+                ((success_count++))
+            fi
             [[ -z "$content" ]] && content="[]"
             
             $first && first=false || result+=","
             result+="\"$node\":$content"
         else
+            failed_nodes+=("$node")
             $first && first=false || result+=","
             result+="\"$node\":[]"
         fi
     done
     result+="}"
     
-    log_info "Retrieved images from ${#nodes[@]} nodes"
+    # Log summary with failure info
+    if [[ ${#failed_nodes[@]} -gt 0 ]]; then
+        log_warning "Failed to retrieve images from ${#failed_nodes[@]} node(s): ${failed_nodes[*]}"
+    fi
+    log_info "Successfully retrieved images from $success_count of ${#nodes[@]} nodes"
+    
     echo "$result"
 }
 
