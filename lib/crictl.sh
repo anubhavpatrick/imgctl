@@ -4,6 +4,16 @@
 # ============================================================================
 # Author: Anubhav Patrick <anubhav.patrick@giindia.com>
 # Date: 2025-11-29
+#Key Capabilities:
+#   - Output Parsing: Robustly converts 'crictl images' text tables into structured JSON.
+#   - Parallel Fetching: Orchestrates concurrent SSH data retrieval using GNU Parallel 
+#     or native Bash background jobs (auto-detects capability).
+#   - Intelligent Caching: Caches raw JSON responses per node to 
+#     minimize network latency and SSH handshake overhead.
+#   - Advanced Filtering: Applies regex-based blocklists (from CSV) and removes 
+#     dangling (<none>) images using optimized 'jq' pipelines.
+#   - Comparative Analysis: Implements a Map-Reduce engine to pivot data from 
+#     "Node-Centric" to "Image-Centric" views, identifying Global vs. Unique images.
 # ============================================================================
 
 # Get the directory where the script is located
@@ -76,25 +86,16 @@ get_node_images_single() {
     # cache key is the node name with special characters replaced with underscores
     local cache_key="node_${node//[^a-zA-Z0-9]/_}" 
     
-    # Check cache
-    local cache_file="${CACHE_DIR:-/var/cache/imgctl}/${cache_key}.cache"
-    if [[ "$ENABLE_CACHE" == "true" && -f "$cache_file" ]]; then
-        local file_age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
-        if [[ $file_age -lt ${CACHE_TTL:-300} ]]; then
-            cat "$cache_file"
-            return 0
-        fi
+    # Check cache using shared function from common.sh
+    local cached_data
+    if cached_data=$(get_cache "$cache_key"); then
+        echo "$cached_data"
+        return 0
     fi
     
-    # Build SSH command
-    local ssh_cmd="ssh"
-    [[ -n "$SSH_OPTIONS" ]] && ssh_cmd+=" $SSH_OPTIONS"
-    [[ -n "$SSH_KEY" && -f "$SSH_KEY" ]] && ssh_cmd+=" -i $SSH_KEY"
-    [[ -n "$SSH_USER" ]] && ssh_cmd+=" ${SSH_USER}@${node}" || ssh_cmd+=" $node"
-    
-    # Get images
+    # Get images via SSH using shared function from common.sh
     local output
-    output=$($ssh_cmd "timeout ${CRICTL_TIMEOUT:-30} ${CRICTL_PATH:-/usr/bin/crictl} images 2>/dev/null" 2>/dev/null)
+    output=$(ssh_exec "$node" "timeout ${CRICTL_TIMEOUT:-30} ${CRICTL_PATH:-/usr/bin/crictl} images 2>/dev/null")
     
     # If ssh command fails or output is empty, return empty JSON
     if [[ $? -ne 0 || -z "$output" ]]; then
@@ -105,17 +106,15 @@ get_node_images_single() {
     local images_json
     images_json=$(parse_crictl_output "$output")
     
-    # Cache result (unfiltered - filtering happens at display time)
-    if [[ "$ENABLE_CACHE" == "true" ]]; then
-        mkdir -p "${CACHE_DIR:-/var/cache/imgctl}" 2>/dev/null
-        echo "$images_json" > "$cache_file"
-    fi
+    # Cache result using shared function from common.sh (unfiltered - filtering happens at display time)
+    set_cache "$cache_key" "$images_json"
     
     echo "$images_json"
 }
 
 # Export functions to be used in parallel otherwise the subprocesses will not have access to the functions
-export -f parse_crictl_output get_node_images_single 2>/dev/null
+# Also export shared functions from common.sh that are now used by get_node_images_single
+export -f parse_crictl_output get_node_images_single build_ssh_command ssh_exec get_cache set_cache 2>/dev/null
 
 # Get images from all nodes
 get_all_nodes_images() {
@@ -123,6 +122,8 @@ get_all_nodes_images() {
     read -ra nodes <<< "$WORKER_NODES" # read raw string into an array of nodes
     
     [[ ${#nodes[@]} -eq 0 ]] && echo "{}" && return 1
+    
+    log_info "Fetching images from ${#nodes[@]} worker nodes..."
     
     local tmpdir=$(mktemp -d)
     trap "rm -rf $tmpdir" EXIT
@@ -165,29 +166,122 @@ get_all_nodes_images() {
     done
     result+="}"
     
+    log_info "Retrieved images from ${#nodes[@]} nodes"
     echo "$result"
 }
 
 # Compare images between nodes with filtering
+# Input -> json of all nodes images
+# Output -> json of common and node specific images
 compare_node_images() {
     local all_nodes_images="$1"
     local ignore_file="${IGNORE_FILE:-/etc/imgctl/images_to_ignore.txt}"
     
-    # Build ignore list for jq
+    # Build ignore list (CSV -> JSON) for jq
+    # The ignore file input and output conversion looks as follows:
+    # Input:
+    # IMAGE,TAG,IMAGE ID,SIZE
+    # docker.io/calico/cni,v3.29.2,cda13293c895a,99.3MB
+    # docker.io/calico/node,v3.29.2,048bf7af1f8c6,142MB
+    #
+    # Output:
+    # [
+    #   "docker.io/calico/cni,v3.29.2",
+    #   "docker.io/calico/node,v3.29.2"
+    # ]
     local ignore_array="[]"
     if [[ -f "$ignore_file" ]]; then
         ignore_array=$(tail -n +2 "$ignore_file" | awk -F',' '{print $1","$2}' | jq -R -s 'split("\n") | map(select(. != ""))')
     fi
     
+    
     echo "$all_nodes_images" | jq --argjson ignore "$ignore_array" '
+    
+    # Each image is a JSON object with the following fields:
+    # - repository: the repository of the image
+    # - tag: the tag of the image
+    # - image_id: the image ID of the image
+    # - size: the size of the image
+
     # Filter function - exclude <none> tags and ignored images
+    # Search for the image in the ignore list and if it is not found, keep it
     def should_keep: 
         .tag != "<none>" and .tag != "" and 
         (("\(.repository),\(.tag)") as $key | ($ignore | index($key)) == null);
     
     # Filter all node images first
+    # Example input to map_values():
+    # {
+    #   "node1": [
+    #     {"repository": "repo/a", "tag": "1.0", "image_id": "abc123", "size": "50MB"},
+    #     {"repository": "repo/b", "tag": "<none>", "image_id": "def456", "size": "70MB"}
+    #   ],
+    #   "node2": [
+    #     {"repository": "repo/a", "tag": "1.0", "image_id": "abc123", "size": "50MB"}
+    #   ]
+    # }
+    #
+    # Example output after map_values([.[] | select(should_keep)]):
+    # {
+    #   "node1": [
+    #     {"repository": "repo/a", "tag": "1.0", "image_id": "abc123", "size": "50MB"}
+    #   ],
+    #   "node2": [
+    #     {"repository": "repo/a", "tag": "1.0", "image_id": "abc123", "size": "50MB"}
+    #   ]
+    # }
     map_values([.[] | select(should_keep)]) |
     
+    # -----------------------------------------------------------
+    # Input:
+    # {
+    #   "node1": [
+    #     {"repository": "nginx", "tag": "latest", "image_id": "123", "size": "50MB"},
+    #     {"repository": "busybox", "tag": "1.0", "image_id": "456", "size": "5MB"}
+    #   ],
+    #   "node2": [
+    #     {"repository": "nginx", "tag": "latest", "image_id": "123", "size": "50MB"}
+    #   ]
+    # }
+    #
+    # Output:
+    # {
+    #   "nginx:latest": {
+    #     "image": {
+    #       "repository": "nginx",
+    #       "tag": "latest",
+    #       "image_id": "123",
+    #       "size": "50MB"
+    #     },
+    #     "nodes": [
+    #       "node1",
+    #       "node2"
+    #     ]
+    #   },
+    #   "busybox:1.0": {
+    #     "image": {
+    #       "repository": "busybox",
+    #       "tag": "1.0",
+    #       "image_id": "456",
+    #       "size": "5MB"
+    #     },
+    #     "nodes": [
+    #       "node1"
+    #     ]
+    #   }
+    # }
+    # -----------------------------------------------------------
+    # The following block transforms the filtered node-images map into
+    # a map from 'repository:tag' to an object with { image, nodes }.
+    reduce (to_entries[] | .key as $node | .value[] | {
+        ref: "\(.repository):\(.tag)",
+        node: $node,
+        image: .
+    }) as $item (
+        {};
+        .[$item.ref] = (.[$item.ref] // {image: $item.image, nodes: []}) |
+        .[$item.ref].nodes += [$item.node]
+    )
     # Now do the comparison
     keys as $nodes |
     reduce (to_entries[] | .key as $node | .value[] | {
@@ -199,10 +293,15 @@ compare_node_images() {
         .[$item.ref] = (.[$item.ref] // {image: $item.image, nodes: []}) | 
         .[$item.ref].nodes += [$item.node]
     ) |
+
+
     . as $map |
     ($nodes | length) as $node_count |
-    {
+    {  
+        # Find common images (present on all nodes)
         common: [$map | to_entries[] | select(.value.nodes | length == $node_count) | .value.image],
+        
+        # Which unique items does EACH specific node possess?
         node_specific: (reduce $nodes[] as $node ({}; 
             .[$node] = [$map | to_entries[] | 
                 select(.value.nodes | length < $node_count) | 
