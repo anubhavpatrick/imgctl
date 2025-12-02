@@ -25,6 +25,28 @@ BOLD='\033[1m'
 declare -A LOG_LEVELS=([DEBUG]=0 [INFO]=1 [WARNING]=2 [ERROR]=3)
 CURRENT_DATE=$(date +%Y-%m-%d)
 
+# Generate UUID for session/correlation ID 
+# Uses uuidgen if available, falls back to /proc/sys/kernel/random/uuid (Linux),
+# or generates a pseudo-UUID as last resort
+generate_uuid() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen
+    elif [[ -f /proc/sys/kernel/random/uuid ]]; then
+        cat /proc/sys/kernel/random/uuid
+    else
+        # Fallback: generate pseudo-UUID using available entropy
+        printf '%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n' \
+            $RANDOM $RANDOM $RANDOM \
+            $(( ($RANDOM & 0x0fff) | 0x4000 )) \
+            $(( ($RANDOM & 0x3fff) | 0x8000 )) \
+            $RANDOM $RANDOM $RANDOM
+    fi
+}
+
+# Correlation ID - unique identifier for this session/execution (first 8 chars of UUID)
+# Can be overridden via environment variable for tracing across systems
+CORRELATION_ID="${CORRELATION_ID:-$(generate_uuid | tr -d '-' | head -c 8)}"
+
 # ----------------------------------------------------------------------------
 # LOGGING FUNCTIONS
 # ----------------------------------------------------------------------------
@@ -49,7 +71,7 @@ log_message() {
     # Decide if the message should be logged or not
     # Log only if the message level is greater than or equal to configured level
     if [[ ${LOG_LEVELS[$level]:-1} -ge ${LOG_LEVELS[$configured_level]:-1} ]]; then
-        local log_entry="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message"
+        local log_entry="[$(date '+%Y-%m-%d %H:%M:%S')] [${CORRELATION_ID}] [$level] $message"
         [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]] && echo "$log_entry" >> "$LOG_FILE"
         [[ "$level" == "ERROR" ]] && echo -e "${RED}ERROR:${NC} $message" >&2
     fi
@@ -59,6 +81,9 @@ log_debug()   { log_message "DEBUG" "$1"; }
 log_info()    { log_message "INFO" "$1"; }
 log_warning() { log_message "WARNING" "$1"; }
 log_error()   { log_message "ERROR" "$1"; }
+
+# Get current correlation ID (useful for displaying to users or external tracing)
+get_correlation_id() { echo "$CORRELATION_ID"; }
 
 # Cleanup old log files based on retention policy
 cleanup_old_logs() {
