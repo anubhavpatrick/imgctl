@@ -124,8 +124,26 @@ cmd_get() {
     case "$scope" in
         all)
             log_info "Getting all images (Harbor + nodes)"
-            harbor_images=$(get_harbor_images)
-            node_images=$(get_all_nodes_images)
+            
+            # Fetch Harbor and node images in parallel for faster execution
+            local tmpdir
+            tmpdir=$(mktemp -d)
+            trap "rm -rf $tmpdir" RETURN
+            
+            # Launch both fetches in background (same pattern as crictl.sh/harbor.sh)
+            get_harbor_images > "$tmpdir/harbor.json" &
+            local pid_harbor=$! # $! is used to get the process id of the last background process
+            get_all_nodes_images > "$tmpdir/nodes.json" &
+            local pid_nodes=$! # $! is used to get the process id of the last background process
+            
+            # Wait for both to complete
+            wait "$pid_harbor" 2>/dev/null
+            wait "$pid_nodes" 2>/dev/null
+            
+            # Read results
+            harbor_images=$(cat "$tmpdir/harbor.json")
+            node_images=$(cat "$tmpdir/nodes.json")
+            
             comparison=$(compare_node_images "$node_images")
             ;;
         harbor)
