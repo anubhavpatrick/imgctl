@@ -5,7 +5,7 @@
 # This script removes imgctl from the system.
 #
 # Author: Anubhav Patrick <anubhav.patrick@giindia.com>
-# Date: 2025-06-11
+# Date: 2025-12-03
 # ============================================================================
 
 set -e
