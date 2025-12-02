@@ -238,13 +238,9 @@ get_harbor_images() {
     
     log_info "Fetching images from Harbor (parallel mode)..."
     
-    # Time projects fetch
-    local start_time=$SECONDS
     # Get all projects first
     local projects
     projects=$(harbor_api_get_all "/api/v2.0/projects")
-    local projects_time=$((SECONDS - start_time))
-    log_info "Projects API call took ${projects_time} seconds"
     
     [[ "$projects" == "[]" || -z "$projects" ]] && echo "[]" && return 0
     
@@ -258,7 +254,6 @@ get_harbor_images() {
     local project_names=$(echo "$projects" | jq -r '.[].name') #-r is used to output the result as a raw string
     
     # Fetch repositories for all projects in parallel
-    start_time=$SECONDS
     local project_count=$(echo "$project_names" | grep -c .)
     
     if [[ "$HAS_PARALLEL" == "yes" && $project_count -gt 1 ]]; then
@@ -276,9 +271,6 @@ get_harbor_images() {
             fetch_project_repos "$project_name" >> "$repo_list"
         done <<< "$project_names"
     fi
-    
-    local repos_loop_time=$((SECONDS - start_time))
-    log_info "Repository loop took ${repos_loop_time} seconds for $project_count projects"
     
     local repo_count=$(wc -l < "$repo_list") 
     log_info "Found $repo_count repositories to process"
