@@ -27,6 +27,47 @@ filter_harbor_images() {
 }
 
 # ----------------------------------------------------------------------------
+# SPINNER / PROGRESS INDICATOR
+# ----------------------------------------------------------------------------
+
+# Global variable to track spinner PID
+SPINNER_PID=""
+
+# Start a spinner with a message
+# Usage: start_spinner "Collecting images..."
+start_spinner() {
+    local message="${1:-Working...}"
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    
+    # Only show spinner if stdout is a terminal
+    [[ ! -t 1 ]] && return
+    
+    (
+        local i=0
+        while true; do
+            printf "\r${CYAN}${spin_chars:$i:1}${NC} %s" "$message"
+            i=$(( (i + 1) % ${#spin_chars} ))
+            sleep 0.1
+        done
+    ) &
+    SPINNER_PID=$!
+    
+    # Ensure spinner is killed on script exit
+    trap "stop_spinner" EXIT
+}
+
+# Stop the spinner and clear the line
+stop_spinner() {
+    if [[ -n "$SPINNER_PID" ]]; then
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null
+        SPINNER_PID=""
+        # Clear the spinner line only if stdout is a terminal
+        [[ -t 1 ]] && printf "\r\033[K"
+    fi
+}
+
+# ----------------------------------------------------------------------------
 # TABLE FORMATTING
 # ----------------------------------------------------------------------------
 

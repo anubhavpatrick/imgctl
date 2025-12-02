@@ -156,36 +156,24 @@ cmd_get() {
     case "$scope" in
         all)
             log_info "Getting all images (Harbor + nodes)"
+            start_spinner "Collecting images from Harbor and nodes..."
             
             # Fetch Harbor and node images in parallel for faster execution
             local tmpdir
             tmpdir=$(mktemp -d)
             trap "rm -rf $tmpdir" RETURN
             
-            # === TEMPORARY: Sequential execution with timing ===
-            # Commented out parallel execution for performance testing
-            # # Launch both fetches in background (same pattern as crictl.sh/harbor.sh)
-            # get_harbor_images > "$tmpdir/harbor.json" &
-            # local pid_harbor=$! # $! is used to get the process id of the last background process
-            # get_all_nodes_images > "$tmpdir/nodes.json" &
-            # local pid_nodes=$! # $! is used to get the process id of the last background process
-            # 
-            # # Wait for both to complete
-            # wait "$pid_harbor" 2>/dev/null
-            # wait "$pid_nodes" 2>/dev/null
-
-            # Time harbor images fetch
-            local start_time=$SECONDS
-            get_harbor_images > "$tmpdir/harbor.json"
-            local harbor_time=$((SECONDS - start_time))
-            log_info "Harbor images fetch took ${harbor_time} seconds"
-
-            # Time node images fetch
-            start_time=$SECONDS
-            get_all_nodes_images > "$tmpdir/nodes.json"
-            local nodes_time=$((SECONDS - start_time))
-            log_info "Node images fetch took ${nodes_time} seconds"
-            # === END TEMPORARY ===
+            # Launch both fetches in background (same pattern as crictl.sh/harbor.sh)
+            get_harbor_images > "$tmpdir/harbor.json" &
+            local pid_harbor=$!
+            get_all_nodes_images > "$tmpdir/nodes.json" &
+            local pid_nodes=$!
+            
+            # Wait for both to complete
+            wait "$pid_harbor" 2>/dev/null
+            wait "$pid_nodes" 2>/dev/null
+            
+            stop_spinner
             
             # Read results
             harbor_images=$(cat "$tmpdir/harbor.json")
@@ -195,11 +183,15 @@ cmd_get() {
             ;;
         harbor)
             log_info "Getting Harbor images only"
+            start_spinner "Collecting images from Harbor..."
             harbor_images=$(get_harbor_images)
+            stop_spinner
             ;;
         nodes)
             log_info "Getting all node images"
+            start_spinner "Collecting images from nodes..."
             node_images=$(get_all_nodes_images)
+            stop_spinner
             comparison=$(compare_node_images "$node_images")
             ;;
     esac
@@ -241,9 +233,12 @@ cmd_compare() {
     done
     
     log_info "Comparing images across nodes"
+    start_spinner "Collecting images from nodes for comparison..."
     
     local node_images
     node_images=$(get_all_nodes_images)
+    
+    stop_spinner
     
     local comparison
     comparison=$(compare_node_images "$node_images")
