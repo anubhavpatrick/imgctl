@@ -162,15 +162,30 @@ cmd_get() {
             tmpdir=$(mktemp -d)
             trap "rm -rf $tmpdir" RETURN
             
-            # Launch both fetches in background (same pattern as crictl.sh/harbor.sh)
-            get_harbor_images > "$tmpdir/harbor.json" &
-            local pid_harbor=$! # $! is used to get the process id of the last background process
-            get_all_nodes_images > "$tmpdir/nodes.json" &
-            local pid_nodes=$! # $! is used to get the process id of the last background process
-            
-            # Wait for both to complete
-            wait "$pid_harbor" 2>/dev/null
-            wait "$pid_nodes" 2>/dev/null
+            # === TEMPORARY: Sequential execution with timing ===
+            # Commented out parallel execution for performance testing
+            # # Launch both fetches in background (same pattern as crictl.sh/harbor.sh)
+            # get_harbor_images > "$tmpdir/harbor.json" &
+            # local pid_harbor=$! # $! is used to get the process id of the last background process
+            # get_all_nodes_images > "$tmpdir/nodes.json" &
+            # local pid_nodes=$! # $! is used to get the process id of the last background process
+            # 
+            # # Wait for both to complete
+            # wait "$pid_harbor" 2>/dev/null
+            # wait "$pid_nodes" 2>/dev/null
+
+            # Time harbor images fetch
+            local start_time=$SECONDS
+            get_harbor_images > "$tmpdir/harbor.json"
+            local harbor_time=$((SECONDS - start_time))
+            log_info "Harbor images fetch took ${harbor_time} seconds"
+
+            # Time node images fetch
+            start_time=$SECONDS
+            get_all_nodes_images > "$tmpdir/nodes.json"
+            local nodes_time=$((SECONDS - start_time))
+            log_info "Node images fetch took ${nodes_time} seconds"
+            # === END TEMPORARY ===
             
             # Read results
             harbor_images=$(cat "$tmpdir/harbor.json")
