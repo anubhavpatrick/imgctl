@@ -9,7 +9,7 @@
 #   4. Summary statistics
 #
 # Author: Anubhav Patrick <anubhav.patrick@giindia.com>
-# Date: 2025-06-11
+# Date: 2025-12-02
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ----------------------------------------------------------------------------
 
 # Filter Harbor images (remove <none> tags)
+# harbor.sh collects all the images; this function filters out the images with no tag
 filter_harbor_images() {
     local images_json="$1"
     echo "$images_json" | jq '[.[] | select(.tag != "<none>" and .tag != "")]'
@@ -71,6 +72,7 @@ format_comparison_table() {
     # 2. Node-specific images (in order)
     local nodes=$(echo "$comparison_json" | jq -r '.node_specific | keys[]' | sort)
     
+    # Here IFS is used to read the input line by line verbatim
     while IFS= read -r node; do
         [[ -z "$node" ]] && continue
         
