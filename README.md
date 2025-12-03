@@ -78,6 +78,49 @@ The installer will automatically:
 - Create log and cache directories
 - Create symlink at `/usr/local/bin/imgctl`
 
+### Enable for Non-Root Users (Optional)
+
+`imgctl` requires root privileges because it:
+- Uses SSH to access worker nodes (with root's SSH keys)
+- Reads Harbor credentials from protected configuration files
+
+To allow all users to run `imgctl` without typing `sudo`, configure sudoers and a shell alias:
+
+**Step 1: Create sudoers rule**
+
+```bash
+sudo visudo -f /etc/sudoers.d/imgctl
+```
+
+Add the following entry:
+
+```
+ALL ALL=(root) NOPASSWD: /opt/imgctl/bin/imgctl
+```
+
+**Step 2: Create shell alias for all users**
+
+```bash
+sudo vim /etc/profile.d/imgctl.sh
+```
+
+Add the following entry:
+
+```bash
+alias imgctl='sudo /opt/imgctl/bin/imgctl'
+```
+
+**Step 3:** Users must log out and log back in for the alias to take effect.
+
+**Security Note**: This configuration only grants passwordless sudo for the `imgctl` command specifically — users cannot run other commands as root.
+
+**To remove** (during uninstall):
+
+```bash
+sudo rm /etc/sudoers.d/imgctl
+sudo rm /etc/profile.d/imgctl.sh
+```
+
 ### Configuration
 
 Edit the configuration file:

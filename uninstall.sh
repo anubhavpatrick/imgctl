@@ -208,6 +208,19 @@ if [[ -n "$INVOKING_USER_HOME" ]] && [[ "$INVOKING_USER_HOME" != "$ROOT_HOME" ]]
 fi
 
 echo ""
+
+# Remind about optional sudoers/alias files
+if [[ -f "/etc/sudoers.d/imgctl" ]] || [[ -f "/etc/profile.d/imgctl.sh" ]]; then
+    echo -e "${YELLOW}Note:${NC} If you configured imgctl for non-root users, remove these files:"
+    echo ""
+    [[ -f "/etc/sudoers.d/imgctl" ]] && echo "  • Remove sudoers rule:"
+    [[ -f "/etc/sudoers.d/imgctl" ]] && echo -e "    ${CYAN}sudo rm /etc/sudoers.d/imgctl${NC}"
+    echo ""
+    [[ -f "/etc/profile.d/imgctl.sh" ]] && echo "  • Remove shell alias:"
+    [[ -f "/etc/profile.d/imgctl.sh" ]] && echo -e "    ${CYAN}sudo rm /etc/profile.d/imgctl.sh${NC}"
+    echo ""
+fi
+
 echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${GREEN}║              Uninstall Completed Successfully!             ║${NC}"
 echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
